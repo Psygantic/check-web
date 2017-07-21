@@ -19,17 +19,37 @@ def new_driver(webdriver_url, browser_capabilities)
       :ftp      => @config['proxy'],
       :ssl      => @config['proxy']
     )
-    caps = Selenium::WebDriver::Remote::Capabilities.chrome(:proxy => proxy)
+    if (Dir.entries(".").include? "extension.crx")
+      caps = Selenium::WebDriver::Remote::Capabilities.chrome ({
+          'chromeOptions' => {
+            'extensions' => [
+              Base64.strict_encode64(File.open('./extension.crx', 'rb').read)
+            ]
+          }, :proxy => proxy
+        })
+    else
+      caps = Selenium::WebDriver::Remote::Capabilities.chrome(:proxy => proxy)
+    end
     dr = Selenium::WebDriver.for(:chrome, :desired_capabilities => caps , :url => @config['chromedriver_url'])
   else
-    dr = Selenium::WebDriver.for(:remote, url: webdriver_url, desired_capabilities: browser_capabilities)
-  end
+    if ((Dir.entries(".").include? "extension.crx") and (browser_capabilities == :chrome))
+      caps = Selenium::WebDriver::Remote::Capabilities.chrome ({
+          'chromeOptions' => {
+            'extensions' => [
+              Base64.strict_encode64(File.open('./extension.crx', 'rb').read)
+            ]
+          }
+        })
+      dr = Selenium::WebDriver.for(:chrome, :desired_capabilities => caps , :url => webdriver_url)
+    else
+      dr = Selenium::WebDriver.for(:remote, url: webdriver_url, desired_capabilities: browser_capabilities)  
+    end
+  end  
   dr
 end
 
 $caller_name = ""
 shared_examples 'app' do |webdriver_url, browser_capabilities|
-
   include AppSpecHelpers
 
   before :all do
@@ -45,6 +65,10 @@ shared_examples 'app' do |webdriver_url, browser_capabilities|
     @t1 = 'team1' + Time.now.to_i.to_s
     @t2 = 'team2' + Time.now.to_i.to_s
     @new_tag = nil
+
+    if ((browser_capabilities == :chrome) and (@config['self_url'].include? "@" and @config['self_url'].include? ":"))
+      @config['self_url'] = @config['self_url'][0..(@config['self_url'].index('//')+1)] + @config['self_url'][(@config['self_url'].index('@')+1)..-1]
+    end
 
     begin
       FileUtils.cp('./config.js', '../build/web/js/config.js')
@@ -72,6 +96,16 @@ shared_examples 'app' do |webdriver_url, browser_capabilities|
   end
 
   context "web" do
+    ## Prioritized Script for Automation ##
+    it "should register and login using e-mail" do
+      login_pg = LoginPage.new(config: @config, driver: @driver).load
+      email, password = ['sysops' + Time.now.to_i.to_s + '@meedan.com', '22345678']
+      login_pg.register_and_login_with_email(email: email, password: password)
+      me_pg = MePage.new(config: @config, driver: login_pg.driver).load # reuse tab
+      displayed_name = me_pg.title
+      expect(displayed_name == 'User With Email').to be(true)
+    end
+
     it "should login using Slack" do
       p = Page.new(config: @config, driver: @driver)
       p.go ("https://#{@config['slack_domain']}.slack.com")
@@ -103,16 +137,6 @@ shared_examples 'app' do |webdriver_url, browser_capabilities|
       displayed_name = me_pg.title
       expected_name = @config['facebook_name']
       expect(displayed_name).to eq(expected_name)
-    end
-
-    ## Prioritized Script for Automation ##
-    it "should register and login using e-mail" do
-      login_pg = LoginPage.new(config: @config, driver: @driver).load
-      email, password = ['sysops' + Time.now.to_i.to_s + '@meedan.com', '22345678']
-      login_pg.register_and_login_with_email(email: email, password: password)
-      me_pg = MePage.new(config: @config, driver: login_pg.driver).load # reuse tab
-      displayed_name = me_pg.title
-      expect(displayed_name == 'User With Email').to be(true)
     end
 
     it "should login using Twitter" do
